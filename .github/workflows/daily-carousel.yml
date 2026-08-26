@@ -1,0 +1,107 @@
+name: Daily ADHD carousel
+
+on:
+  schedule:
+    # 15:00 UTC = 8am Pacific in summer (PDT), 7am in winter (PST).
+    - cron: "0 15 * * *"
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Schedule as a Metricool draft (true) or auto-publish (false)"
+        type: boolean
+        default: true
+      day:
+        description: "Pacific date YYYY-MM-DD to build (blank = yesterday)"
+        type: string
+        default: ""
+      networks:
+        description: "Comma-separated Metricool networks"
+        type: string
+        default: "instagram"
+
+concurrency:
+  group: daily-adhd-carousel
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  carousel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Build slides
+        id: build
+        env:
+          METRICOOL_TOKEN: ${{ secrets.METRICOOL_TOKEN }}
+        run: |
+          set -o pipefail
+          ARGS=""
+          if [ -n "${{ inputs.day }}" ]; then ARGS="--day ${{ inputs.day }}"; fi
+          python scripts/build.py $ARGS | tee build.log
+          echo "day=$(grep '^BUILD_DAY=' build.log | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Commit slides
+        env:
+          DAY: ${{ steps.build.outputs.day }}
+        run: |
+          git config user.name  "adhd-carousel-bot"
+          git config user.email "actions@github.com"
+          git add "slides/$DAY"
+          if git diff --cached --quiet; then
+            echo "No slide changes to commit."
+          else
+            git commit -m "slides: carousel for $DAY"
+            # Another run may have landed first; rebase rather than fail.
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - name: Schedule to Metricool
+        env:
+          METRICOOL_TOKEN: ${{ secrets.METRICOOL_TOKEN }}
+          DAY: ${{ steps.build.outputs.day }}
+          AUTOPUBLISH: ${{ vars.AUTOPUBLISH }}
+          NETWORKS: ${{ inputs.networks }}
+        run: |
+          # Draft is the default everywhere. It goes live only when a manual run
+          # explicitly passes draft=false, or when the repo variable AUTOPUBLISH
+          # is set to "true" (that is the switch for the daily cron).
+          DRAFT=true
+          if [ "${{ inputs.draft }}" = "false" ]; then
+            DRAFT=false
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ "${AUTOPUBLISH}" = "true" ]; then
+            DRAFT=false
+          fi
+          echo "draft=$DRAFT (event=${{ github.event_name }}, AUTOPUBLISH=${AUTOPUBLISH:-unset})"
+          python scripts/schedule_post.py \
+            --day "$DAY" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref  "${GITHUB_REF_NAME}" \
+            --networks "${NETWORKS:-instagram}" \
+            --draft "$DRAFT"
+
+      - name: Upload slides artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slides
+          path: |
+            slides/${{ steps.build.outputs.day }}/
+            build.log
+          if-no-files-found: warn
