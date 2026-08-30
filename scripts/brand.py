@@ -1,9 +1,12 @@
 """Visual identity for the ADHD carousel.
 
-NOTE: brand 5333281 has no design system in Metricool — its "logo" is a profile
-photo. This palette was authored for this pipeline on 2026-08-26 and has NOT
-been approved by Alex. Change freely until he signs off; after that, treat it
-the way the real-estate carousel treats its own approved design.
+Brand 5333281 has no design system in Metricool — its "logo" is a profile photo —
+so this palette and layout were authored for this pipeline and reviewed against
+real rendered slides.
+
+APPROVED by Alex on 2026-08-30. Treat it the way the real-estate carousel treats
+its own approved design: do not restyle, re-space, or "improve" it as a side
+effect of another change. Design changes need Alex to ask for them.
 """
 
 HANDLE = "the.alexmaldonado"

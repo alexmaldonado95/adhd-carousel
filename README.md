@@ -62,6 +62,6 @@ Brand: blogId `5333281`, userId `2761513`, timezone `America/Los_Angeles`.
 
 ## Slide design
 
-The palette and layout in `scripts/brand.py` were authored on 2026-08-26 for this
-pipeline and are **pending Alex's approval** — brand 5333281 has no design system
-in Metricool to inherit from.
+The palette and layout in `scripts/brand.py` are **approved (2026-08-30)**. Brand
+5333281 has no design system in Metricool to inherit from, so this file is the
+ADHD visual identity. Don't restyle it as a side effect of another change.
