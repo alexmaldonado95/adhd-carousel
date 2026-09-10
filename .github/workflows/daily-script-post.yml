@@ -1,0 +1,118 @@
+name: Daily script card
+
+# The adhd-twin pipeline schedules one long-form script to Threads around
+# midday Pacific. This job renders that same script as a brand quote card and
+# schedules it to Instagram + TikTok (both need an image; Threads doesn't).
+# It reads the script from the Metricool scheduler, so it needs no access to
+# the private adhd-twin repo.
+
+on:
+  schedule:
+    # 19:45 UTC = 12:45pm Pacific in summer — after the Threads post is
+    # scheduled (~11:35am), before it publishes (1pm+). GitHub cron drifts
+    # late, which is fine: the analytics fallback finds the post after it
+    # publishes too.
+    - cron: "45 19 * * *"
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Schedule as a Metricool draft (true) or auto-publish (false)"
+        type: boolean
+        default: true
+      day:
+        description: "Pacific date YYYY-MM-DD (blank = today)"
+        type: string
+        default: ""
+      at:
+        description: "Pacific HH:MM to publish"
+        type: string
+        default: "16:00"
+      networks:
+        description: "Comma-separated Metricool networks"
+        type: string
+        default: "instagram,tiktok"
+
+concurrency:
+  group: daily-script-card
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  script-card:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Render the card
+        id: build
+        env:
+          METRICOOL_TOKEN: ${{ secrets.METRICOOL_TOKEN }}
+        run: |
+          set -o pipefail
+          ARGS="--render-only"
+          if [ -n "${{ inputs.day }}" ]; then ARGS="$ARGS --day ${{ inputs.day }}"; fi
+          python scripts/script_card.py $ARGS | tee build.log
+          echo "day=$(grep '^SCRIPT_DAY=' build.log | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Commit the card
+        env:
+          DAY: ${{ steps.build.outputs.day }}
+        run: |
+          git config user.name  "adhd-carousel-bot"
+          git config user.email "actions@github.com"
+          git add "slides/$DAY"
+          if git diff --cached --quiet; then
+            echo "No slide changes to commit."
+          else
+            git commit -m "slides: script card for $DAY"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - name: Schedule to Metricool
+        env:
+          METRICOOL_TOKEN: ${{ secrets.METRICOOL_TOKEN }}
+          AUTOPUBLISH: ${{ vars.AUTOPUBLISH }}
+        run: |
+          # Same gate as the carousel: drafts everywhere unless a manual run
+          # passes draft=false or the repo variable AUTOPUBLISH is "true".
+          DRAFT=true
+          if [ "${{ inputs.draft }}" = "false" ]; then
+            DRAFT=false
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ "${AUTOPUBLISH}" = "true" ]; then
+            DRAFT=false
+          fi
+          echo "draft=$DRAFT (event=${{ github.event_name }}, AUTOPUBLISH=${AUTOPUBLISH:-unset})"
+          ARGS=""
+          if [ -n "${{ inputs.day }}" ]; then ARGS="$ARGS --day ${{ inputs.day }}"; fi
+          python scripts/script_card.py $ARGS \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref  "${GITHUB_REF_NAME}" \
+            --at "${{ inputs.at || '16:00' }}" \
+            --networks "${{ inputs.networks || 'instagram,tiktok' }}" \
+            --draft "$DRAFT"
+
+      - name: Upload card artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: script-card
+          path: |
+            slides/${{ steps.build.outputs.day }}/
+            build.log
+          if-no-files-found: warn
