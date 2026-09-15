@@ -49,6 +49,7 @@ jobs:
         id: build
         env:
           METRICOOL_TOKEN: ${{ secrets.METRICOOL_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
           ARGS=""
@@ -75,9 +76,14 @@ jobs:
       - name: Schedule to Metricool
         env:
           METRICOOL_TOKEN: ${{ secrets.METRICOOL_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DAY: ${{ steps.build.outputs.day }}
           AUTOPUBLISH: ${{ vars.AUTOPUBLISH }}
           NETWORKS: ${{ inputs.networks }}
+          # Writes this run's posts into the ledger shared with the 6pm
+          # carousel repo. Optional: without it the read-side skip still works,
+          # but that pipeline can reuse what this one just published.
+          LEDGER_TOKEN: ${{ secrets.LEDGER_TOKEN }}
         run: |
           # Draft is the default everywhere. It goes live only when a manual run
           # explicitly passes draft=false, or when the repo variable AUTOPUBLISH

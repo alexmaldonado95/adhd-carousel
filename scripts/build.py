@@ -15,6 +15,7 @@ from datetime import date, datetime
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
+import ledger
 import metricool
 import render
 from brand import HANDLE
@@ -45,7 +46,32 @@ def main():
     args = ap.parse_args()
 
     day = date.fromisoformat(args.day) if args.day else None
-    day, posts = metricool.top_threads_posts(day=day, limit=args.limit)
+    # Over-fetch so the ledger can veto some without starving the countdown,
+    # then trim back to --limit after the filter.
+    day, posts = metricool.top_threads_posts(day=day, limit=args.limit * 3)
+
+    used_keys, _, _ = ledger.load()
+    ledger.check_key_drift(used_keys)
+    if used_keys:
+        fresh, reused = [], []
+        for p in posts:
+            (reused if ledger.is_used(p["text"], used_keys) else fresh).append(p)
+        for p in reused:
+            print(f"[build] already used by the 6pm carousel: {p['text'][:60]!r}")
+
+        # Both pipelines draw on the same ~6 posts a day while the 6pm one alone
+        # consumes ~12, so on most days strict dedupe leaves too little to build
+        # a countdown from. Failing the run over that would just trade duplicate
+        # posts for no post at all, so top back up from the highest-ranked
+        # reused ones and say plainly that is what happened.
+        posts = fresh
+        if len(posts) < MIN_POSTS and reused:
+            topup = reused[:MIN_POSTS - len(posts)]
+            print(f"[build] only {len(fresh)} unused post(s) - topping up with "
+                  f"{len(topup)} the 6pm carousel has already run. They WILL be "
+                  f"duplicates. Both pipelines are competing for one pool.")
+            posts = posts + topup
+    posts = posts[:args.limit]
 
     print(f"[build] Pacific day {day} — {len(posts)} usable post(s)")
     for i, p in enumerate(posts, 1):

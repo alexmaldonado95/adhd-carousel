@@ -20,6 +20,7 @@ import urllib.request
 from datetime import date, datetime, timedelta
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
+import ledger
 import metricool
 
 RAW = "https://raw.githubusercontent.com/{repo}/{ref}/slides/{day}/{name}"
@@ -109,6 +110,18 @@ def main():
     pid = ((resp or {}).get("data") or {}).get("id")
     print(f"SCHEDULED_ID={pid}")
     print(f"SCHEDULED_AT={publish_at}")
+
+    # Only now, with the post accepted, claim these posts in the shared ledger.
+    # Registering at build time would burn them whenever scheduling later failed.
+    # A draft is not a publication, so it claims nothing.
+    if draft:
+        print("[ledger] draft run - not registering anything as used")
+    else:
+        ledger.register(
+            [ledger.normalize_key(p.get("text", ""))
+             for p in manifest.get("posts", [])],
+            day.isoformat(),
+        )
 
 
 if __name__ == "__main__":
